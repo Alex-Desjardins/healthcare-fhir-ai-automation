@@ -1,0 +1,596 @@
+{
+  "name": "FHIR-Powered Patient Intake Summary",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        -32
+      ],
+      "id": "b3db0c66-dce8-41fc-b375-7c3ae7685d0b",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = JSON.parse($json[\"data\"]);\nconst entries = data.entry || [];\n\nreturn entries.map(entry => {\n  const resource = entry.resource || {};\n  const nameObj = resource.name?.[0] || {};\n  const givenNames = nameObj.given || [];\n  const firstName = givenNames[0] || 'Unknown';\n  const lastName = nameObj.family || 'Unknown';\n\n  return {\n    json: {\n      id: resource.id,\n      firstName,\n      lastName,\n      gender: resource.gender || 'unknown',\n      birthDate: resource.birthDate || 'unknown'\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -32
+      ],
+      "id": "16a168d2-4d51-4eea-9b4c-62f1367479fa",
+      "name": "Extract Patient Details",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "=https://hapi.fhir.org/baseR4/Condition?subject=Patient/{{$json[\"id\"]}}&_format=json",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 2000
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        112
+      ],
+      "id": "0a472e3a-1b6e-48be-8cbc-7e0f89a0522d",
+      "name": "GET Conditions",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "https://hapi.fhir.org/baseR4/Patient?_count=40&_format=json",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -224,
+        -32
+      ],
+      "id": "b90b1c1d-327c-4116-a6da-065911c42029",
+      "name": "GET Patients",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process ALL condition results at once\n// $input.all() gives us the entire array of results from GET Conditions\n\nconst allResults = $input.all();\n\nreturn allResults.map(item => {\n  const data = JSON.parse(item.json.data);\n  const bundle = data || {};\n  \n  // Extract patient ID from URL\n  function extractPatientId(bundle) {\n    if (!bundle.link || !bundle.link[0]) return 'unknown';\n    const url = bundle.link[0].url;\n    const match = url.match(/Patient%2F([^&%]+)/);\n    return match ? match[1] : 'unknown';\n  }\n\n  const patientId = extractPatientId(bundle);\n  const entries = bundle.entry || [];\n  const total = bundle.total || 0;\n\n  // If no conditions\n  if (total === 0 || entries.length === 0) {\n    return {\n      json: {\n        patientId: patientId,\n        conditions: [],\n        conditionCount: 0,\n        hasConditions: false,\n        summary: `Patient ${patientId}: No conditions found`\n      }\n    };\n  }\n\n  // Process conditions\n  const processedConditions = entries.map(entry => {\n    const condition = entry.resource || {};\n    \n    return {\n      id: condition.id,\n      name: condition.code?.text || condition.code?.coding?.[0]?.display || 'Unknown condition',\n      severity: condition.severity?.text || condition.severity?.coding?.[0]?.display || 'Unknown severity',\n      onsetAge: condition.onsetAge?.value || null,\n      bodySite: condition.bodySite?.[0]?.text || condition.bodySite?.[0]?.coding?.[0]?.display || null,\n      snomedCode: condition.code?.coding?.[0]?.code || null,\n      evidence: condition.evidence?.map(ev => \n        ev.code?.[0]?.text || ev.code?.[0]?.coding?.[0]?.display\n      ).filter(Boolean) || []\n    };\n  });\n\n  const conditionNames = processedConditions.map(c => c.name);\n\n  return {\n    json: {\n      patientId: patientId,\n      conditions: processedConditions,\n      conditionCount: processedConditions.length,\n      hasConditions: true,\n      conditionNames: conditionNames,\n      summary: `Patient ${patientId}: ${processedConditions.length} conditions - ${conditionNames.slice(0, 3).join(', ')}${conditionNames.length > 3 ? ' and others' : ''}`\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        112
+      ],
+      "id": "7a3f671b-8f57-4ea4-a818-3cce0b408957",
+      "name": "Process Conditions Data",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "id",
+              "field2": "patientId"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        608,
+        -16
+      ],
+      "id": "4f1c6579-8903-4135-aac2-a3ef3f0ddc5f",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bd888b6d-28f3-4031-bad6-fb37ccfa4143",
+              "leftValue": "={{ $json.needsAISummary }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1072,
+        208
+      ],
+      "id": "dcb93b1f-473b-4fff-bed8-e8af3139ebcb",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Clean up data for final Google Sheets output\nconst allPatients = $input.all();\n\nreturn allPatients.map(item => {\n  const patient = item.json;\n  \n  return {\n    json: {\n      patientId: patient.patientId,\n      firstName: patient.firstName,\n      lastName: patient.lastName,\n      dateOfBirth: patient.birthDate,\n      gender: patient.gender,\n      aiSummary: patient.aiSummary\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        160
+      ],
+      "id": "38120549-3913-4a44-82a6-5bfcc99c2f6e",
+      "name": "Final Cleanup"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process ALL OpenAI responses at once\nconst allResponses = $input.all();\n\nreturn allResponses.map(item => {\n  const aiSummary = item.json.message.content;\n  \n  // Extract patient ID from the AI summary content\n  let patientId = null;\n  const idMatch = aiSummary.match(/ID[:\\s]*([^\\s\\)]+)/);\n  if (idMatch) {\n    patientId = idMatch[1];\n  }\n\n  return {\n    json: {\n      patientId: patientId,\n      aiSummary: aiSummary,\n      hasAISummary: true\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        80
+      ],
+      "id": "84a2134d-49cf-4d6d-9118-daed57a29de7",
+      "name": "Extract AI Summary",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "patientId",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1760,
+        0
+      ],
+      "id": "f150cfb9-a432-4dfa-bea9-17367928e206",
+      "name": "Merge Summary"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1984,
+        160
+      ],
+      "id": "8e7dc07b-de60-41e3-b3f6-f110a2e470bf",
+      "name": "Merge Patients",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.chatgptPrompt }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        1280,
+        80
+      ],
+      "id": "a27248f6-5635-4b66-bd26-c6c332a309a7",
+      "name": "Generate Medical Summary",
+      "credentials": {
+        "openAiApi": {
+          "id": "t3hYOkKczhsXEYjw",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format the merged data for both spreadsheet output and ChatGPT processing\n// Process ALL items in the input array\n\nconst allResults = $input.all();\n\nreturn allResults.map(item => {\n  const data = item.json;\n  \n  return {\n    json: {\n      // Basic patient info for spreadsheet\n      patientId: data.patientId,\n      firstName: data.firstName,\n      lastName: data.lastName,\n      fullName: `${data.firstName} ${data.lastName}`,\n      gender: data.gender,\n      birthDate: data.birthDate,\n      \n      // Condition summary for spreadsheet\n      conditionCount: data.conditionCount,\n      hasConditions: data.hasConditions,\n      conditionsList: data.conditionNames ? data.conditionNames.join(', ') : 'No conditions',\n      \n      // For ChatGPT processing (only for patients with conditions)\n      needsAISummary: data.hasConditions,\n      chatgptPrompt: data.hasConditions ? createChatGPTPrompt(data) : null,\n      \n      // Placeholder for AI summary (will be filled by ChatGPT or set to default)\n      aiSummary: data.hasConditions ? null : 'No medical conditions reported',\n      \n      // Raw condition data (for reference)\n      conditions: data.conditions || []\n    }\n  };\n});\n\nfunction createChatGPTPrompt(patientData) {\n  const { firstName, lastName, patientId, conditions, conditionCount } = patientData;\n  \n  // Format conditions with key details\n  const conditionDetails = conditions.map(condition => {\n    let detail = `${condition.name}`;\n    if (condition.severity && condition.severity !== 'Unknown severity') {\n      detail += ` (${condition.severity.toLowerCase()} severity)`;\n    }\n    if (condition.onsetAge) {\n      detail += ` - onset at age ${condition.onsetAge}`;\n    }\n    if (condition.bodySite) {\n      detail += ` affecting ${condition.bodySite}`;\n    }\n    return detail;\n  }).join('; ');\n\n  return `Please create a concise medical summary for this patient:\n\nPatient: ${firstName} ${lastName} (ID: ${patientId})\nMedical Conditions (${conditionCount} total): ${conditionDetails}\n\nProvide a 2-3 sentence clinical summary highlighting:\n1. Primary health concerns\n2. Potential condition interactions or complications\n3. Overall health status assessment\n\nKeep the summary professional but accessible, suitable for healthcare providers.`;\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        -16
+      ],
+      "id": "a8bd6847-b28e-46d9-ad99-225e95487c25",
+      "name": "Format Patient Data"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1GBZoYRPq7VVpsSdZWnCN-HWwFfEV86vJPwRpW16MB9A/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBZoYRPq7VVpsSdZWnCN-HWwFfEV86vJPwRpW16MB9A/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Patient ID": "={{ $json.patientId }}",
+            "First Name": "={{ $json.firstName }}",
+            "Last Name": "={{ $json.lastName }}",
+            "DOB": "={{ $json.dateOfBirth }}",
+            "Gender": "={{ $json.gender }}",
+            "Medical Summary": "={{ $json.aiSummary }}"
+          },
+          "matchingColumns": [
+            "Patient ID"
+          ],
+          "schema": [
+            {
+              "id": "Patient ID",
+              "displayName": "Patient ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "First Name",
+              "displayName": "First Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Last Name",
+              "displayName": "Last Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "DOB",
+              "displayName": "DOB",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Gender",
+              "displayName": "Gender",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Medical Summary",
+              "displayName": "Medical Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2368,
+        160
+      ],
+      "id": "05055b71-04c6-4cc3-b199-2897ae65fdd1",
+      "name": "Append row in sheet",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "KladsmsfhJho0ndT",
+          "name": "Personal Google Sheets O-Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## FHIR Data Retrieval",
+        "height": 480,
+        "width": 624,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -256,
+        -144
+      ],
+      "id": "0a37f254-32f8-4892-ad1a-c2977da5c71b",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Data Processing",
+        "height": 480,
+        "width": 656
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        368,
+        -144
+      ],
+      "id": "65709cbe-687a-4e46-9c71-32320945f6e6",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## AI Analysis",
+        "height": 480,
+        "width": 880,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        -144
+      ],
+      "id": "6ad7189a-b941-45f8-81ae-5a7e1a2a51cb",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## Final Output",
+        "height": 480,
+        "width": 672,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1904,
+        -144
+      ],
+      "id": "2d4239fa-5ff1-4f19-93ba-de389025d885",
+      "name": "Sticky Note3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "GET Patients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Patient Details": {
+      "main": [
+        [
+          {
+            "node": "GET Conditions",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Conditions": {
+      "main": [
+        [
+          {
+            "node": "Process Conditions Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Patients": {
+      "main": [
+        [
+          {
+            "node": "Extract Patient Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Conditions Data": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Format Patient Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Generate Medical Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Patients",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Extract AI Summary": {
+      "main": [
+        [
+          {
+            "node": "Merge Summary",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Summary": {
+      "main": [
+        [
+          {
+            "node": "Merge Patients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Patients": {
+      "main": [
+        [
+          {
+            "node": "Final Cleanup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Medical Summary": {
+      "main": [
+        [
+          {
+            "node": "Extract AI Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Patient Data": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Cleanup": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "028ac558-0706-4089-9fda-ba34e5b4a111",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9aa002034957e2ed5924976665563b58b9538bc575e6a3acff73a03666c56c89"
+  },
+  "id": "qGHNggptyXaVDDOc",
+  "tags": []
+}
