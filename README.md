@@ -1,6 +1,6 @@
 ## Workflow Visualization
 
-![FHIR Workflow Overview](screenshots/workflow-overview.png)
+![FHIR Workflow Overview](screenshot/workflow-overview.png)
 
 *The complete n8n workflow showing the four main processing stages: FHIR Data Retrieval, Data Processing, AI Analysis, and Final Output.*
 
