@@ -1,9 +1,3 @@
-## Workflow Visualization
-
-![FHIR Workflow Overview](screenshot/workflow-overview.png)
-
-*The complete n8n workflow showing the four main processing stages: FHIR Data Retrieval, Data Processing, AI Analysis, and Final Output.*
-
 # FHIR-Powered Patient Intake Summary
 
 An automated healthcare data pipeline that retrieves patient information from FHIR APIs, processes medical conditions, generates AI-powered clinical summaries, and outputs structured data to Google Sheets for healthcare workflow integration.
@@ -22,6 +16,12 @@ This n8n workflow demonstrates enterprise-grade healthcare data processing by:
 ```
 FHIR API → Data Processing → AI Analysis → Google Sheets
 ```
+
+## Workflow Visualization
+
+![FHIR Workflow Overview](screenshot/workflow-overview.png)
+
+*The complete n8n workflow showing the four main processing stages: FHIR Data Retrieval, Data Processing, AI Analysis, and Final Output.*
 
 ### Data Flow
 1. **FHIR Data Retrieval**: Extract patient demographics and conditions from HAPI FHIR server
